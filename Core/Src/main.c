@@ -18,7 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include "stdio.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -127,6 +127,9 @@ int main(void)
 
    HAL_Delay(3000);
 
+   // Clear LCD Display
+   CharLCD_Clear();
+
    HAL_ADC_Start(&hadc1);
   /* USER CODE END 2 */
 
@@ -146,7 +149,7 @@ int main(void)
 	  snprintf(lcdBuffer, sizeof(lcdBuffer), "Pct: %3lu%%", (unsigned long)percentage);
 
 	  // clear LCD before write
-	  CharLCD_Clear();
+//	  CharLCD_Clear();
 
 	  // Write Values to LCD Display
 	  CharLCD_Set_Cursor(0,0);
