@@ -18,7 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "stdio.h"
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -56,12 +56,15 @@ ADC_HandleTypeDef hadc1;
 
 I2C_HandleTypeDef hi2c1;
 
+TIM_HandleTypeDef htim6;
+
 /* USER CODE BEGIN PV */
 
 uint32_t rawADC = 0;
 uint32_t percentage = 0;
 char rawADCString[17];
 char lcdBuffer[17];
+char screenSelect = 0;
 
 /* USER CODE END PV */
 
@@ -70,6 +73,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM6_Init(void);
 /* USER CODE BEGIN PFP */
 void CharLCD_Write_Nibble (uint8_t nibble, uint8_t dc);
 void CharLCD_Send_Cmd(uint8_t cmd);
@@ -117,6 +121,7 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_ADC1_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
    // Test display
    CharLCD_Init(); // Initialize the LCD
@@ -131,6 +136,7 @@ int main(void)
    CharLCD_Clear();
 
    HAL_ADC_Start(&hadc1);
+   HAL_TIM_Base_Start(&htim6);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -138,26 +144,63 @@ int main(void)
   while (1)
   {
 
-	  // Read data from sensor
-	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	  rawADC = HAL_ADC_GetValue(&hadc1);
-	  // math for Sensor
-	  percentage = (rawADC * 100) / 4095;
+	  switch(screenSelect) {
 
-	  // ints to strings
-	  snprintf(rawADCString, sizeof(rawADCString), "ADC: %4lu", (unsigned long)rawADC);
-	  snprintf(lcdBuffer, sizeof(lcdBuffer), "Pct: %3lu%%", (unsigned long)percentage);
+	  case (screenSelect == temp):
 
-	  // clear LCD before write
-//	  CharLCD_Clear();
+			  // start DHT
+			  DHT11_Start();
+			  Presence = DHT11_Check_Response();
+			  Rh_byte1 = DHT11_Read ();
+			  Rh_byte2 = DHT11_Read ();
+			  Temp_byte1 = DHT11_Read ();
+			  Temp_byte2 = DHT11_Read ();
+			  SUM = DHT11_Read();
 
-	  // Write Values to LCD Display
-	  CharLCD_Set_Cursor(0,0);
-	  CharLCD_Write_String(rawADCString);
-	  CharLCD_Set_Cursor(1,0);
-	  CharLCD_Write_String(lcdBuffer);
+			  TEMP = Temp_byte1;
+			  RH = Rh_byte1;
 
-	  HAL_Delay(500);
+			  Temperature = (float) TEMP;
+			  Humidity = (float) RH;
+
+
+			  // display temp on (0,0) and humidity on (1,0)
+			  CharLCD_Set_Cursor(0,0);
+			  CharLCD_Write_String();
+			  CharLCD_Set_Cursor(1,0);
+			  CharLCD_Write_String();
+
+			  HAL_Delay(3000);
+
+		break;
+
+	  case (screenSelect == water):
+
+		// Read data from sensor
+			  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+			  rawADC = HAL_ADC_GetValue(&hadc1);
+			  // math for Sensor
+			  percentage = (rawADC * 100) / 4095;
+
+			  // ints to strings
+			  snprintf(rawADCString, sizeof(rawADCString), "ADC: %4lu", (unsigned long)rawADC);
+			  snprintf(lcdBuffer, sizeof(lcdBuffer), "Pct: %3lu%%", (unsigned long)percentage);
+
+			  // clear LCD before write
+			  // CharLCD_Clear();
+
+			  // Write Values to LCD Display
+			  CharLCD_Set_Cursor(0,0);
+			  CharLCD_Write_String(rawADCString);
+			  CharLCD_Set_Cursor(1,0);
+			  CharLCD_Write_String(lcdBuffer);
+
+			  HAL_Delay(500);
+
+		break;
+	  }
+
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -184,13 +227,12 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 10;
+  RCC_OscInitStruct.PLL.PLLN = 18;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
@@ -205,7 +247,7 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
@@ -297,7 +339,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x10D19CE4;
+  hi2c1.Init.Timing = 0x00C08CCB;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -330,12 +372,51 @@ static void MX_I2C1_Init(void)
 }
 
 /**
+  * @brief TIM6 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM6_Init(void)
+{
+
+  /* USER CODE BEGIN TIM6_Init 0 */
+
+  /* USER CODE END TIM6_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM6_Init 1 */
+
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 50-1;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 0xffff-1;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM6_Init 2 */
+
+  /* USER CODE END TIM6_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -346,12 +427,31 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
+  /*Configure GPIO pin : BUTTON_Pin */
+  GPIO_InitStruct.Pin = BUTTON_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(BUTTON_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : DHT11_Pin */
+  GPIO_InitStruct.Pin = DHT11_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(DHT11_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
+
+
+
 /**
  * @brief Write a 4-bit nibble to the LCD via I2C
  * @param nibble: 4-bit data to send (lower 4 bits)
@@ -452,6 +552,47 @@ void CharLCD_Set_Cursor(uint8_t row, uint8_t column) {
 void CharLCD_Clear(void) {
  CharLCD_Send_Cmd(0x01); // Clear display command
  HAL_Delay(2); // Wait for command execution
+}
+
+// DHT11 Functions
+void DHT11_Start (void)
+{
+	Set_Pin_Output (DHT11_GPIO_Port, DHT11_Pin);  // set the pin as output
+	HAL_GPIO_WritePin (DHT11_GPIO_Port, DHT11_Pin, 0);   // pull the pin low
+	delay (18000);   // wait for 18ms
+	Set_Pin_Input(DHT11_GPIO_Port, DHT11_Pin);    // set as input
+}
+
+uint8_t Check_Response (void)
+{
+	uint8_t Response = 0;
+	delay (40);
+	if (!(HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)))
+	{
+		delay (80);
+		if ((HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin))) Response = 1;
+		else Response = -1;
+	}
+	while ((HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)));   // wait for the pin to go low
+
+	return Response;
+}
+
+uint8_t DHT11_Read (void)
+{
+	uint8_t i,j;
+	for (j=0;j<8;j++)
+	{
+		while (!(HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)));   // wait for the pin to go high
+		delay (40);   // wait for 40 us
+		if (!(HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)))   // if the pin is low
+		{
+			i&= ~(1<<(7-j));   // write 0
+		}
+		else i|= (1<<(7-j));  // if the pin is high, write 1
+		while ((HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)));  // wait for the pin to go low
+	}
+	return i;
 }
 /* USER CODE END 4 */
 
