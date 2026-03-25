@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,6 +37,7 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 // 1602 I2C address
+// 1602 I2C address
 #define I2C_ADDR 0x27 // I2C address of the PCF8574
 // 1602 dimensions
 #define LCD_ROWS 2 // Number of rows on the LCD
@@ -44,7 +45,7 @@
 // 1602 message bit numbers
 #define DC_BIT 0 // Data/Command bit (register select bit)
 #define EN_BIT 2 // Enable bit
-#define BL_BIT 3 // Backlight bit
+#define BL_BIT 3 // Back light bit
 #define D4_BIT 4 // Data 4 bit
 #define D5_BIT 5 // Data 5 bit
 #define D6_BIT 6 // Data 6 bit
@@ -56,15 +57,16 @@ ADC_HandleTypeDef hadc1;
 
 I2C_HandleTypeDef hi2c1;
 
-TIM_HandleTypeDef htim6;
+TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
-
 uint32_t rawADC = 0;
 uint32_t percentage = 0;
-char rawADCString[17];
-char lcdBuffer[17];
-char screenSelect = 0;
+char rawADCString[20];
+char lcdBuffer[20];
+volatile uint8_t showTempFlag = 0;
+uint8_t Rh = 0;
+uint8_t Temp = 0;
 
 /* USER CODE END PV */
 
@@ -73,7 +75,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_ADC1_Init(void);
-static void MX_TIM6_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 void CharLCD_Write_Nibble (uint8_t nibble, uint8_t dc);
 void CharLCD_Send_Cmd(uint8_t cmd);
@@ -82,7 +84,9 @@ void CharLCD_Init();
 void CharLCD_Write_String(char *str);
 void CharLCD_Set_Cursor(uint8_t row, uint8_t column);
 void CharLCD_Clear(void);
-
+uint8_t DHT11_Start(void);
+uint8_t DHT11_Read(void);
+void delay_us(uint16_t us);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -121,89 +125,93 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_ADC1_Init();
-  MX_TIM6_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-   // Test display
-   CharLCD_Init(); // Initialize the LCD
-   CharLCD_Set_Cursor(0,0); // Set cursor to row 0, column 0
-   CharLCD_Write_String("TEST LINE 1");
-   CharLCD_Set_Cursor(1,0); // Set cursor to row 1, column 0
-   CharLCD_Write_String("TEST LINE 2");
+  // Test display
+    // Start the microsecond timer for DHT11 sensor timing
+    HAL_TIM_Base_Start(&htim2);
 
-   HAL_Delay(3000);
+    // Start the ADC for the water level sensor
+    HAL_ADC_Start(&hadc1);
 
-   // Clear LCD Display
-   CharLCD_Clear();
+    // 2. INITIALIZE DISPLAY
+    CharLCD_Init();
+    CharLCD_Set_Cursor(0,0);
+    CharLCD_Write_String("ECEN_260");
+    CharLCD_Set_Cursor(1,0);
+    CharLCD_Write_String("FINAL_PROJ");
 
-   HAL_ADC_Start(&hadc1);
-   HAL_TIM_Base_Start(&htim6);
+    // Show splash screen for 3 seconds
+    HAL_Delay(3000);
+
+    // Clear the screen so it's ready for the live data loop
+    CharLCD_Clear();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+      // --- ALWAYS RUN WATER SENSOR ---
+      HAL_ADC_Start(&hadc1);
+      if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
+          rawADC = HAL_ADC_GetValue(&hadc1);
+          percentage = (rawADC * 100) / 4095;
+          if (percentage > 100) percentage = 100;
 
-	  switch(screenSelect) {
+          snprintf(rawADCString, sizeof(rawADCString), "Water: %3lu%%    ", percentage);
+          CharLCD_Set_Cursor(1,0);
+          CharLCD_Write_String(rawADCString);
+      }
+      HAL_ADC_Stop(&hadc1);
 
-	  case (screenSelect == temp):
+      // --- ONLY RUN TEMP SENSOR IF BUTTON WAS PRESSED ---
+            if (showTempFlag)
+            {
+                // Show a status message immediately so the user knows the button worked
+                CharLCD_Set_Cursor(0,0);
+                CharLCD_Write_String("Reading...      ");
+                HAL_Delay(200);
+                if (DHT11_Start())
+                {
+                    // Read all 5 bytes sent by the sensor
+                    uint8_t rh_byte1 = DHT11_Read();
+                    uint8_t rh_byte2 = DHT11_Read();
+                    uint8_t temp_byte1 = DHT11_Read();
+                    uint8_t temp_byte2 = DHT11_Read();
+                    uint8_t checksum = DHT11_Read();
 
-			  // start DHT
-			  DHT11_Start();
-			  Presence = DHT11_Check_Response();
-			  Rh_byte1 = DHT11_Read ();
-			  Rh_byte2 = DHT11_Read ();
-			  Temp_byte1 = DHT11_Read ();
-			  Temp_byte2 = DHT11_Read ();
-			  SUM = DHT11_Read();
+                    // Checksum validation - ensures data wasn't corrupted during the 1-wire timing
+                    if (checksum == (uint8_t)(rh_byte1 + rh_byte2 + temp_byte1 + temp_byte2))
+                    {
+                        Rh = rh_byte1;
+                        Temp = temp_byte1;
+                        // Format the string: T:22C  H:38%
+                        snprintf(lcdBuffer, sizeof(lcdBuffer), "T:%02dC  H:%02d%%   ", Temp, Rh);
+                    }
+                    else
+                    {
+                        // Occurs if the microsecond timing is slightly off
+                        snprintf(lcdBuffer, sizeof(lcdBuffer), "Checksum Fail! ");
+                    }
+                }
+                else
+                {
+                    // Occurs if the DHT11 doesn't pull the line low to acknowledge the start signal
+                    snprintf(lcdBuffer, sizeof(lcdBuffer), "Sensor Error!  ");
+                }
 
-			  TEMP = Temp_byte1;
-			  RH = Rh_byte1;
+                // Update the LCD with either the data or the error message
+                CharLCD_Set_Cursor(0,0);
+                CharLCD_Write_String(lcdBuffer);
 
-			  Temperature = (float) TEMP;
-			  Humidity = (float) RH;
-
-
-			  // display temp on (0,0) and humidity on (1,0)
-			  CharLCD_Set_Cursor(0,0);
-			  CharLCD_Write_String();
-			  CharLCD_Set_Cursor(1,0);
-			  CharLCD_Write_String();
-
-			  HAL_Delay(3000);
-
-		break;
-
-	  case (screenSelect == water):
-
-		// Read data from sensor
-			  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-			  rawADC = HAL_ADC_GetValue(&hadc1);
-			  // math for Sensor
-			  percentage = (rawADC * 100) / 4095;
-
-			  // ints to strings
-			  snprintf(rawADCString, sizeof(rawADCString), "ADC: %4lu", (unsigned long)rawADC);
-			  snprintf(lcdBuffer, sizeof(lcdBuffer), "Pct: %3lu%%", (unsigned long)percentage);
-
-			  // clear LCD before write
-			  // CharLCD_Clear();
-
-			  // Write Values to LCD Display
-			  CharLCD_Set_Cursor(0,0);
-			  CharLCD_Write_String(rawADCString);
-			  CharLCD_Set_Cursor(1,0);
-			  CharLCD_Write_String(lcdBuffer);
-
-			  HAL_Delay(500);
-
-		break;
-	  }
-
-
+                // Reset the flag so we wait for the next button press
+                showTempFlag = 0;
+            }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+      HAL_Delay(10);
   }
   /* USER CODE END 3 */
 }
@@ -227,12 +235,13 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 18;
+  RCC_OscInitStruct.PLL.PLLN = 10;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
@@ -247,7 +256,7 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
@@ -284,7 +293,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = ENABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.NbrOfConversion = 1;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
@@ -339,7 +348,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x00C08CCB;
+  hi2c1.Init.Timing = 0x10D19CE4;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -372,40 +381,47 @@ static void MX_I2C1_Init(void)
 }
 
 /**
-  * @brief TIM6 Initialization Function
+  * @brief TIM2 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_TIM6_Init(void)
+static void MX_TIM2_Init(void)
 {
 
-  /* USER CODE BEGIN TIM6_Init 0 */
+  /* USER CODE BEGIN TIM2_Init 0 */
 
-  /* USER CODE END TIM6_Init 0 */
+  /* USER CODE END TIM2_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  /* USER CODE BEGIN TIM6_Init 1 */
+  /* USER CODE BEGIN TIM2_Init 1 */
 
-  /* USER CODE END TIM6_Init 1 */
-  htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 50-1;
-  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 0xffff-1;
-  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 79;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
   {
     Error_Handler();
   }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN TIM6_Init 2 */
+  /* USER CODE BEGIN TIM2_Init 2 */
 
-  /* USER CODE END TIM6_Init 2 */
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
@@ -427,17 +443,27 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin : BUTTON_Pin */
-  GPIO_InitStruct.Pin = BUTTON_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(BUTTON_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : DHT11_Pin */
-  GPIO_InitStruct.Pin = DHT11_Pin;
+  /*Configure GPIO pin : TEMP_SENSOR_BUTTON_Pin */
+  GPIO_InitStruct.Pin = TEMP_SENSOR_BUTTON_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(TEMP_SENSOR_BUTTON_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : TEMP_SENSOR_Pin */
+  GPIO_InitStruct.Pin = TEMP_SENSOR_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(DHT11_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(TEMP_SENSOR_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LD2_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
@@ -449,9 +475,6 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
-
-
 /**
  * @brief Write a 4-bit nibble to the LCD via I2C
  * @param nibble: 4-bit data to send (lower 4 bits)
@@ -554,45 +577,52 @@ void CharLCD_Clear(void) {
  HAL_Delay(2); // Wait for command execution
 }
 
-// DHT11 Functions
-void DHT11_Start (void)
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	Set_Pin_Output (DHT11_GPIO_Port, DHT11_Pin);  // set the pin as output
-	HAL_GPIO_WritePin (DHT11_GPIO_Port, DHT11_Pin, 0);   // pull the pin low
-	delay (18000);   // wait for 18ms
-	Set_Pin_Input(DHT11_GPIO_Port, DHT11_Pin);    // set as input
+    if (GPIO_Pin == TEMP_SENSOR_BUTTON_Pin) // Match the label in CubeMX
+    {
+        showTempFlag = 1;
+        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); // Uses the standard LD2 label
+    }
+}
+void delay_us(uint16_t us) {
+    __HAL_TIM_SET_COUNTER(&htim2, 0);
+    while (__HAL_TIM_GET_COUNTER(&htim2) < us);
 }
 
-uint8_t Check_Response (void)
-{
-	uint8_t Response = 0;
-	delay (40);
-	if (!(HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)))
-	{
-		delay (80);
-		if ((HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin))) Response = 1;
-		else Response = -1;
-	}
-	while ((HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)));   // wait for the pin to go low
-
-	return Response;
+uint8_t DHT11_Start(void) {
+    uint8_t Response = 0;
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = TEMP_SENSOR_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(TEMP_SENSOR_GPIO_Port, &GPIO_InitStruct);
+    HAL_GPIO_WritePin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin, 0);
+    HAL_Delay(18);
+    HAL_GPIO_WritePin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin, 1);
+    delay_us(20);
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    HAL_GPIO_Init(TEMP_SENSOR_GPIO_Port, &GPIO_InitStruct);
+    delay_us(40);
+    if (!(HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin))) {
+        delay_us(80);
+        if ((HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin))) Response = 1;
+    }
+    while ((HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin)));
+    return Response;
 }
 
-uint8_t DHT11_Read (void)
-{
-	uint8_t i,j;
-	for (j=0;j<8;j++)
-	{
-		while (!(HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)));   // wait for the pin to go high
-		delay (40);   // wait for 40 us
-		if (!(HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)))   // if the pin is low
-		{
-			i&= ~(1<<(7-j));   // write 0
-		}
-		else i|= (1<<(7-j));  // if the pin is high, write 1
-		while ((HAL_GPIO_ReadPin (DHT11_GPIO_Port, DHT11_Pin)));  // wait for the pin to go low
-	}
-	return i;
+uint8_t DHT11_Read(void) {
+    uint8_t i, j;
+    for (j=0; j<8; j++) {
+        while (!(HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin)));
+        delay_us(40);
+        if (!(HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin))) i &= ~(1<<(7-j));
+        else i |= (1<<(7-j));
+        while ((HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin)));
+    }
+    return i;
 }
 /* USER CODE END 4 */
 
@@ -608,6 +638,7 @@ void Error_Handler(void)
   while (1)
   {
   }
+
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
