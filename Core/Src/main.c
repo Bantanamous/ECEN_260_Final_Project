@@ -156,7 +156,7 @@ int main(void)
       HAL_ADC_Start(&hadc1);
       if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
           rawADC = HAL_ADC_GetValue(&hadc1);
-          percentage = (rawADC * 100) / 4095;
+          percentage = (rawADC * 100) / 1024;
           if (percentage > 100) percentage = 100;
 
           snprintf(rawADCString, sizeof(rawADCString), "Water: %3lu%%    ", percentage);
