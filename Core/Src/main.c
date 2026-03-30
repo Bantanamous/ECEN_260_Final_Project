@@ -64,7 +64,20 @@ uint32_t rawADC = 0;
 uint32_t percentage = 0;
 char rawADCString[20];
 char lcdBuffer[20];
-volatile uint8_t showTempFlag = 0;
+//volatile uint8_t showTempFlag = 0;
+volatile uint8_t buttonPressed = 0;
+
+typedef enum {
+    DISPLAY_WATER = 0,
+    DISPLAY_TEMP  = 1
+} DisplayMode_t;
+
+
+volatile DisplayMode_t displayMode = DISPLAY_WATER;
+
+uint32_t lastDHTReadTick = 0;
+uint8_t dhtValid = 0;
+
 uint8_t Rh = 0;
 uint8_t Temp = 0;
 
@@ -87,6 +100,8 @@ void CharLCD_Clear(void);
 uint8_t DHT11_Start(void);
 uint8_t DHT11_Read(void);
 void delay_us(uint16_t us);
+
+void DHT11_Update(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -152,66 +167,131 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      // --- ALWAYS RUN WATER SENSOR ---
-      HAL_ADC_Start(&hadc1);
-      if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
-          rawADC = HAL_ADC_GetValue(&hadc1);
-          percentage = (rawADC * 100) / 1024;
-          if (percentage > 100) percentage = 100;
+//      // --- ALWAYS RUN WATER SENSOR ---
+//      HAL_ADC_Start(&hadc1);
+//      if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
+//          rawADC = HAL_ADC_GetValue(&hadc1);
+//          percentage = (rawADC * 100) / 1024;
+//          if (percentage > 100) percentage = 100;
+//
+//          snprintf(rawADCString, sizeof(rawADCString), "Water: %3lu%%    ", percentage);
+//          CharLCD_Set_Cursor(1,0);
+//          CharLCD_Write_String(rawADCString);
+//      }
+//      HAL_ADC_Stop(&hadc1);
+//
+//      // --- ONLY RUN TEMP SENSOR IF BUTTON WAS PRESSED ---
+//            if (showTempFlag)
+//            {
+//                // Show a status message immediately so the user knows the button worked
+//                CharLCD_Set_Cursor(0,0);
+//                CharLCD_Write_String("Reading...      ");
+//                HAL_Delay(200);
+//                if (DHT11_Start())
+//                {
+//                    // Read all 5 bytes sent by the sensor
+//                    uint8_t rh_byte1 = DHT11_Read();
+//                    uint8_t rh_byte2 = DHT11_Read();
+//                    uint8_t temp_byte1 = DHT11_Read();
+//                    uint8_t temp_byte2 = DHT11_Read();
+//                    uint8_t checksum = DHT11_Read();
+//
+//                    // Checksum validation - ensures data wasn't corrupted during the 1-wire timing
+//                    if (checksum == (uint8_t)(rh_byte1 + rh_byte2 + temp_byte1 + temp_byte2))
+//                    {
+//                        Rh = rh_byte1;
+//                        Temp = temp_byte1;
+//                        // Format the string: T:22C  H:38%
+//                        snprintf(lcdBuffer, sizeof(lcdBuffer), "T:%02dC  H:%02d%%   ", Temp, Rh);
+//                    }
+//                    else
+//                    {
+//                        // Occurs if the microsecond timing is slightly off
+//                        snprintf(lcdBuffer, sizeof(lcdBuffer), "Checksum Fail! ");
+//                    }
+//                }
+//                else
+//                {
+//                    // Occurs if the DHT11 doesn't pull the line low to acknowledge the start signal
+//                    snprintf(lcdBuffer, sizeof(lcdBuffer), "Sensor Error!  ");
+//                }
+//
+//                // Update the LCD with either the data or the error message
+//                CharLCD_Set_Cursor(0,0);
+//                CharLCD_Write_String(lcdBuffer);
+//
+//                // Reset the flag so we wait for the next button press
+//                showTempFlag = 0;
+//            }
 
-          snprintf(rawADCString, sizeof(rawADCString), "Water: %3lu%%    ", percentage);
-          CharLCD_Set_Cursor(1,0);
-          CharLCD_Write_String(rawADCString);
-      }
-      HAL_ADC_Stop(&hadc1);
 
-      // --- ONLY RUN TEMP SENSOR IF BUTTON WAS PRESSED ---
-            if (showTempFlag)
-            {
-                // Show a status message immediately so the user knows the button worked
-                CharLCD_Set_Cursor(0,0);
-                CharLCD_Write_String("Reading...      ");
-                HAL_Delay(200);
-                if (DHT11_Start())
-                {
-                    // Read all 5 bytes sent by the sensor
-                    uint8_t rh_byte1 = DHT11_Read();
-                    uint8_t rh_byte2 = DHT11_Read();
-                    uint8_t temp_byte1 = DHT11_Read();
-                    uint8_t temp_byte2 = DHT11_Read();
-                    uint8_t checksum = DHT11_Read();
+	  // Code below for LCD Display state machine to toggle display for each sensor.
 
-                    // Checksum validation - ensures data wasn't corrupted during the 1-wire timing
-                    if (checksum == (uint8_t)(rh_byte1 + rh_byte2 + temp_byte1 + temp_byte2))
-                    {
-                        Rh = rh_byte1;
-                        Temp = temp_byte1;
-                        // Format the string: T:22C  H:38%
-                        snprintf(lcdBuffer, sizeof(lcdBuffer), "T:%02dC  H:%02d%%   ", Temp, Rh);
-                    }
-                    else
-                    {
-                        // Occurs if the microsecond timing is slightly off
-                        snprintf(lcdBuffer, sizeof(lcdBuffer), "Checksum Fail! ");
-                    }
-                }
-                else
-                {
-                    // Occurs if the DHT11 doesn't pull the line low to acknowledge the start signal
-                    snprintf(lcdBuffer, sizeof(lcdBuffer), "Sensor Error!  ");
-                }
+	  // Handle button press: toggle display mode
+	  if (buttonPressed)
+	  {
+		  buttonPressed = 0;
 
-                // Update the LCD with either the data or the error message
-                CharLCD_Set_Cursor(0,0);
-                CharLCD_Write_String(lcdBuffer);
+		  if (displayMode == DISPLAY_WATER)
+			  displayMode = DISPLAY_TEMP;
+		  else
+			  displayMode = DISPLAY_WATER;
 
-                // Reset the flag so we wait for the next button press
-                showTempFlag = 0;
-            }
+		  CharLCD_Clear();
+	  }
+
+	  // --- READ WATER SENSOR OFTEN ---
+	  HAL_ADC_Start(&hadc1);
+	  if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
+	  {
+		  rawADC = HAL_ADC_GetValue(&hadc1);
+		  percentage = (rawADC * 100) / 4095;   // 12-bit ADC should use 4095
+		  if (percentage > 100) percentage = 100;
+	  }
+	  HAL_ADC_Stop(&hadc1);
+
+	  // --- UPDATE DHT11 PERIODICALLY ---
+	  // DHT11 shouldn't be read too fast; about once every 1-2 seconds is safe
+	  if (HAL_GetTick() - lastDHTReadTick >= 2000)
+	  {
+		  lastDHTReadTick = HAL_GetTick();
+		  DHT11_Update();
+	  }
+
+	  // --- DISPLAY ONLY ONE SENSOR AT A TIME ---
+	  switch (displayMode)
+	  {
+		  case DISPLAY_WATER:
+			  CharLCD_Set_Cursor(0,0);
+			  CharLCD_Write_String("Water Sensor    ");
+
+			  snprintf(lcdBuffer, sizeof(lcdBuffer), "Level: %3lu%%    ", percentage);
+			  CharLCD_Set_Cursor(1,0);
+			  CharLCD_Write_String(lcdBuffer);
+			  break;
+
+		  case DISPLAY_TEMP:
+			  CharLCD_Set_Cursor(0,0);
+			  CharLCD_Write_String("Temp/Humidity   ");
+
+			  if (dhtValid)
+			  {
+				  snprintf(lcdBuffer, sizeof(lcdBuffer), "T:%02dC H:%02d%%   ", Temp, Rh);
+			  }
+			  else
+			  {
+				  snprintf(lcdBuffer, sizeof(lcdBuffer), "Sensor Error!   ");
+			  }
+
+			  CharLCD_Set_Cursor(1,0);
+			  CharLCD_Write_String(lcdBuffer);
+			  break;
+	  }
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-      HAL_Delay(10);
+      HAL_Delay(200);
   }
   /* USER CODE END 3 */
 }
@@ -582,7 +662,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if (GPIO_Pin == TEMP_SENSOR_BUTTON_Pin) // Match the label in CubeMX
     {
-        showTempFlag = 1;
+//        showTempFlag = 1;
+    	buttonPressed = 1; // for button/display state machine code
         HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); // Uses the standard LD2 label
     }
 }
@@ -615,15 +696,42 @@ uint8_t DHT11_Start(void) {
 }
 
 uint8_t DHT11_Read(void) {
-    uint8_t i, j;
-    for (j=0; j<8; j++) {
+    uint8_t i = 0, j;
+    for (j = 0; j < 8; j++) {
         while (!(HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin)));
         delay_us(40);
-        if (!(HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin))) i &= ~(1<<(7-j));
-        else i |= (1<<(7-j));
+        if (!(HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin))) i &= ~(1 << (7 - j));
+        else i |= (1 << (7 - j));
         while ((HAL_GPIO_ReadPin(TEMP_SENSOR_GPIO_Port, TEMP_SENSOR_Pin)));
     }
     return i;
+}
+
+void DHT11_Update(void)
+{
+    if (DHT11_Start())
+    {
+        uint8_t rh_byte1   = DHT11_Read();
+        uint8_t rh_byte2   = DHT11_Read();
+        uint8_t temp_byte1 = DHT11_Read();
+        uint8_t temp_byte2 = DHT11_Read();
+        uint8_t checksum   = DHT11_Read();
+
+        if (checksum == (uint8_t)(rh_byte1 + rh_byte2 + temp_byte1 + temp_byte2))
+        {
+            Rh = rh_byte1;
+            Temp = temp_byte1;
+            dhtValid = 1;
+        }
+        else
+        {
+            dhtValid = 0;
+        }
+    }
+    else
+    {
+        dhtValid = 0;
+    }
 }
 /* USER CODE END 4 */
 
