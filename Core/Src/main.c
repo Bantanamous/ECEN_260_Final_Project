@@ -65,6 +65,7 @@ uint32_t rawADC = 0;
 uint32_t percentage = 0;
 char rawADCString[20];
 char lcdBuffer[20];
+uint8_t alertToggle = 0;
 
 volatile uint8_t buttonPressed = 0;
 
@@ -202,39 +203,44 @@ int main(void)
 	  // --- UPDATE DHT11 PERIODICALLY ---
 	  // DHT11 shouldn't be read too fast; about once every 1-2 seconds is safe
 	  if (HAL_GetTick() - lastDHTReadTick >= 2000)
-	  {
-		  lastDHTReadTick = HAL_GetTick();
-		  DHT11_Update();
+	        {
+	            lastDHTReadTick = HAL_GetTick();
+	            DHT11_Update();
+	        }
 
-		  // --- RGB TEMPERATURE INDICATOR LOGIC ---
-		  if (dhtValid)
-		  {
-			  if (Temp > 25) // Too Hot
-			  {
-				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 255); // Red
-				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);   // Green
-				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);   // Blue
-			  }
-			  else if (Temp <= 25 && Temp >= 11) // Room Temp
-			  {
-				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 255); // Green
-				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
-			  }
-			  else if (Temp < 11) // Too Cold
-			  {
-				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 255); // Blue
-			  }
-		  }
-		  else // Error state: Dim Purple
-		  {
-			  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 50);
-			  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-			  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 50);
-		  }
-	  }
+	        // --- FAST RGB LOGIC (Outside the 2-second timer) ---
+	        if (dhtValid)
+	        {
+	            if (Temp > 25) // TOO HOT: Blink Red every 200ms
+	            {
+	                if (alertToggle)
+	                {
+	                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 255); // Red ON
+	                }
+	                else
+	                {
+	                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);   // Red OFF
+	                }
+	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);       // Green OFF
+	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);       // Blue OFF
+
+	                alertToggle = !alertToggle; // Flip the bit for the next 200ms loop
+	            }
+	            else if (Temp <= 25 && Temp >= 11) // SAFE: Solid Green
+	            {
+	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 255);
+	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+	                alertToggle = 0;
+	            }
+	            else if (Temp < 11) // TOO COLD: Solid Blue
+	            {
+	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 255);
+	                alertToggle = 0;
+	            }
+	        }
 
 	  // --- DISPLAY ONLY ONE SENSOR AT A TIME ---
 	  switch (displayMode)
