@@ -58,6 +58,7 @@ ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
 
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
 uint32_t rawADC = 0;
@@ -89,6 +90,7 @@ static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void CharLCD_Write_Nibble (uint8_t nibble, uint8_t dc);
 void CharLCD_Send_Cmd(uint8_t cmd);
@@ -141,10 +143,16 @@ int main(void)
   MX_I2C1_Init();
   MX_ADC1_Init();
   MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   // Test display
     // Start the microsecond timer for DHT11 sensor timing
     HAL_TIM_Base_Start(&htim2);
+
+    // Start the PWM channels for the RGB LED
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1); // Red
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2); // Green
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3); // Blue
 
     // Start the ADC for the water level sensor
     HAL_ADC_Start(&hadc1);
@@ -197,6 +205,35 @@ int main(void)
 	  {
 		  lastDHTReadTick = HAL_GetTick();
 		  DHT11_Update();
+
+		  // --- RGB TEMPERATURE INDICATOR LOGIC ---
+		  if (dhtValid)
+		  {
+			  if (Temp > 25) // Too Hot
+			  {
+				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 255); // Red
+				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);   // Green
+				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);   // Blue
+			  }
+			  else if (Temp <= 25 && Temp >= 11) // Room Temp
+			  {
+				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 255); // Green
+				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+			  }
+			  else if (Temp < 11) // Too Cold
+			  {
+				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+				  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 255); // Blue
+			  }
+		  }
+		  else // Error state: Dim Purple
+		  {
+			  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 50);
+			  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+			  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 50);
+		  }
 	  }
 
 	  // --- DISPLAY ONLY ONE SENSOR AT A TIME ---
@@ -443,6 +480,63 @@ static void MX_TIM2_Init(void)
   /* USER CODE BEGIN TIM2_Init 2 */
 
   /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 79;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 255;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
 
 }
 
