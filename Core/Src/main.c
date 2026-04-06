@@ -213,6 +213,10 @@ int main(void)
 	        {
 	            if (Temp > 25) // TOO HOT: Blink Red every 200ms
 	            {
+
+	            	// TURN MOTOR ON (PC1 High)
+	            	HAL_GPIO_WritePin(FAN_GPIO_Port, FAN_Pin, GPIO_PIN_SET);
+
 	                if (alertToggle)
 	                {
 	                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 255); // Red ON
@@ -228,6 +232,9 @@ int main(void)
 	            }
 	            else if (Temp <= 25 && Temp >= 11) // SAFE: Solid Green
 	            {
+
+	            	HAL_GPIO_WritePin(FAN_GPIO_Port, FAN_Pin, GPIO_PIN_RESET); // Fan OFF
+
 	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 255);
 	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
@@ -235,6 +242,10 @@ int main(void)
 	            }
 	            else if (Temp < 11) // TOO COLD: Solid Blue
 	            {
+
+	            	// TURN MOTOR ON (PC1 High)
+					HAL_GPIO_WritePin(FAN_GPIO_Port, FAN_Pin, GPIO_PIN_RESET);
+
 	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
 	                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 255);
@@ -565,6 +576,9 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(FAN_GPIO_Port, FAN_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : TEMP_SENSOR_BUTTON_Pin */
@@ -572,6 +586,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(TEMP_SENSOR_BUTTON_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : FAN_Pin */
+  GPIO_InitStruct.Pin = FAN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(FAN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : TEMP_SENSOR_Pin */
   GPIO_InitStruct.Pin = TEMP_SENSOR_Pin;
